@@ -1,0 +1,14 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Matminer Server",
+            "Group": "Servers",
+            "Port": 5432,
+            "Username": "db_user",
+            "Host": "pg_db",
+            "MaintenanceDB": "postgres",
+            "PassFile": "/pgpass",
+            "SSLMode": "prefer"
+        }
+    }
+}

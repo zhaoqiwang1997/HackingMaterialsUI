@@ -1,0 +1,148 @@
+version: '3.9'
+services:
+  pg_db:
+    container_name: pg_container
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASS
+      POSTGRES_DB: ha_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - proxynet
+
+  pgadmin:
+    container_name: pgadmin4_container
+    profiles:
+      - debug
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: $PGA_USER
+      PGADMIN_DEFAULT_PASSWORD: $PGA_PASS
+    ports:
+      - "5050:80"
+    volumes:
+      - ./postgres-init/servers.json:/pgadmin4/servers.json
+      - ./postgres-init/.pgpassfile:/pgpass
+      #TODO dummy table not being created with line below
+      - ./postgres-init/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - proxynet
+
+  ha_api:
+    container_name: ha_api
+    build: ./
+    profiles:
+      - backend
+    networks:
+      - proxynet
+    ports:
+      - "5000:5000"
+    environment:
+      CELERY_BROKER_URL: redis://:$REDIS_PASSWORD@redis
+      CELERY_RESULT_BACKEND: redis://:$REDIS_PASSWORD@redis
+      STR_CONN: postgresql://$POSTGRES_USER:$POSTGRES_PASS@pg_db:5432/ha_db
+      FLASK_SECRET: $FLASK_SECRET
+      REACT_APP_GOOGLE_CLIENT_ID: $REACT_APP_GOOGLE_CLIENT_ID
+      REACT_APP_MSAL_CLIENT_ID: $REACT_APP_MSAL_CLIENT_ID
+      FLASK_APP: src/main.py
+      FLASK_RUN_HOST: 0.0.0.0
+      FLASK_DEBUG: true
+    command: flask run
+    depends_on:
+      - pg_db
+    # TODO remove persistant volumes after development
+    volumes:
+      - ./src/:/usr/src/hacking-materials/src
+  
+  celery-worker:
+    container_name:  celery-worker
+    # profiles:
+    #   - celery
+    build: ./
+    networks:
+      - proxynet
+    environment:
+      CELERY_BROKER_URL: redis://:$REDIS_PASSWORD@redis
+      CELERY_RESULT_BACKEND: redis://:$REDIS_PASSWORD@redis
+      REACT_APP_GOOGLE_CLIENT_ID: $REACT_APP_GOOGLE_CLIENT_ID
+      REACT_APP_MSAL_CLIENT_ID: $REACT_APP_MSAL_CLIENT_ID
+      STR_CONN: postgresql://$POSTGRES_USER:$POSTGRES_PASS@pg_db:5432/ha_db
+      FLASK_SECRET: $FLASK_SECRET
+      CELERY_ACKS_LATE: true
+      CELERY_WORKER_MAX_TASKS_PER_CHILD: 500
+
+    # TODO remove persistant volumes after development
+    volumes:
+      - ./src/:/usr/src/hacking-materials/src
+    working_dir: /usr/src/hacking-materials
+    command: celery -A src.main.celery worker --loglevel=info
+    depends_on:
+      - redis
+
+  redis:
+    image: redis
+    container_name: redis
+    hostname: redis
+    restart: always
+    ports:
+      - '6379:6379'
+    command:
+      - /bin/sh
+      - -c
+      - redis-server --requirepass $REDIS_PASSWORD
+    volumes:
+      - redis_data:/data
+    networks:
+      - proxynet
+  
+  flower:  
+    image: mher/flower
+    profiles:
+      - debug
+    networks:
+      - proxynet
+    environment:
+      CELERY_BROKER_URL: redis://:$REDIS_PASSWORD@redis
+      CELERY_RESULT_BACKEND: redis://:$REDIS_PASSWORD@redis
+      #FLOWER_BASIC_AUTH: $PGA_USER:$PGA_PASS
+      FLOWER_PORT: 8888
+    depends_on:
+      - redis
+      - ha_api
+      - pg_db
+    ports:  
+      - 8888:8888
+
+  frontend:
+    container_name: frontend
+    profiles:
+      - frontend
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      - proxynet
+    volumes:
+      - ../frontend/nginx/:/etc/nginx
+    depends_on:
+      - ha_api
+
+networks:
+  proxynet:
+    name: matminer_network
+
+volumes:
+  pgadmin-data:
+  postgres-data:
+  redis_data:
+  flower_data:

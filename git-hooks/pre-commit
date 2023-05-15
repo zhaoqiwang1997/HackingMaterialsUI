@@ -1,0 +1,20 @@
+#!/bin/bash
+# vim: ft=bash
+
+set -euxo pipefail
+
+# Enter python virtual environment so that we can use `black`
+source ./src/backend/venv/bin/activate
+
+function format_python() {
+  staged=$(git diff --diff-filter=d --name-only --cached | grep '\.py') || true
+
+  if [ -z "${staged}" ]; then
+    return
+  fi
+
+  black ${staged}
+  git add ${staged}
+}
+
+format_python
